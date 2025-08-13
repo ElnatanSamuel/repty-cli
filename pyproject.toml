@@ -3,10 +3,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cmdvault"
+name = "repty-cli"
 version = "0.1.0"
 description = "Dual-mode terminal command history tool with SQLite FTS5 and Gemini AI search"
-authors = [{ name = "CmdVault" }]
+authors = [{ name = "Repty" }]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cmdvault = "cmdvault.cli:main"
+repty = "cmdvault.cli:main"
 
 [tool.setuptools]
 license-files = ["LICENSE"]

@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: repty-cli
+Version: 0.1.0
+Summary: Dual-mode terminal command history tool with SQLite FTS5 and Gemini AI search
+Author: Repty
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: google-generativeai>=0.7.0
+Dynamic: license-file
+
 # repty
 
 Dual-mode terminal command history tool for Bash/Zsh with:

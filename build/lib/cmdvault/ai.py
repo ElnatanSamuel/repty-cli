@@ -62,8 +62,9 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
                 # Relax to OR if AND finds nothing
                 match_q_or = db.build_fts_query(cleaned or query, mode="or", prefix=True)
                 rows = db.search_fts(conn, match_q_or or cleaned or query, limit=min(limit * 3, 50))
-            # If FTS yields nothing even with OR, do not fall back to recency candidates.
-            # Return no candidates so AI results are empty rather than noisy.
+            if not rows:
+                # Fallback to recency context if FTS yields nothing
+                rows = db.get_last_n(conn, ctx)
 
             # Include tag-based matches along with FTS candidates
             tokens = set((cleaned or "").split())
@@ -108,7 +109,7 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
             filtered_rows = []
             for r in rows:
                 cmd = (r["command"] or "").strip()
-                if cmd.startswith("repty ") or cmd.startswith(". ") or cmd.startswith("source "):
+                if cmd.startswith("repty ") or cmd.startswith(". "):
                     continue
                 commands_ctx.append({
                     "id": r["id"],
@@ -129,7 +130,7 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
                 "identify the most relevant commands. Prefer commands that likely succeeded (exit_code==0) and whose cwd or tags match the intent. "
                 "You MUST choose only from the provided 'commands' list (these are candidates from local FTS); do NOT invent ids. "
                 "Favor favorites only when relevant to the query. "
-                "Return a JSON array of objects with fields: id (int), score (float 0-10 where 10 is best), reason (short string). "
+                "Return a JSON array of objects with fields: id (int), score (float where lower means better), reason (short string). "
                 "Output MUST be a JSON array only. No prose, no prefixes/suffixes, and NO code fences."
             ),
             "commands": commands_ctx,
@@ -182,14 +183,14 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
         for item in data:
             try:
                 cid = int(item.get("id"))
-                score = float(item.get("score", 0.0))
+                score = float(item.get("score", 1.0))
                 reason = str(item.get("reason", ""))
                 r = id_to_row.get(cid)
                 if r is None:
                     continue
                 # Skip internal commands (but allow legitimate shell like 'source')
                 cmd = (r.get("command") or "").strip()
-                if cmd.startswith("repty ") or cmd.startswith(". ") or cmd.startswith("source "):
+                if cmd.startswith("repty ") or cmd.startswith(". "):
                     continue
                 results.append({
                     "id": cid,
@@ -200,14 +201,7 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
             except Exception:
                 continue
 
-        # Apply score threshold (configurable), then deduplicate by command string.
-        try:
-            threshold = float(cfg.get("ai_min_score", 5.0))
-        except Exception:
-            threshold = 5.0
-        results = [it for it in results if it.get("score", 0.0) >= threshold]
-
-        # Deduplicate by command string; keep highest score; tie-break by newer id
+        # Deduplicate by command string; keep lowest score; tie-break by newer id
         best_by_cmd: Dict[str, Dict[str, Any]] = {}
         for it in results:
             cmd = it["row"]["command"]
@@ -215,13 +209,24 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
             if prev is None:
                 best_by_cmd[cmd] = it
                 continue
-            if it["score"] > prev["score"] or (it["score"] == prev["score"] and it["id"] > prev["id"]):
+            if it["score"] < prev["score"] or (it["score"] == prev["score"] and it["id"] > prev["id"]):
                 best_by_cmd[cmd] = it
 
         deduped = list(best_by_cmd.values())
-        # Sort by score descending, then newer id
-        deduped.sort(key=lambda x: (-x["score"], -x["id"]))
+        deduped.sort(key=lambda x: (x["score"], -x["id"]))
         out = deduped[:limit]
+        if not out:
+            # If the model returned nothing usable, provide a deterministic
+            # fallback from the local candidate set so AI still yields results.
+            out = [
+                {
+                    "id": r["id"],
+                    "score": float(i),
+                    "reason": "Top local match",
+                    "row": r,
+                }
+                for i, r in enumerate(rows[:limit])
+            ]
         return out
 
     except Exception as e:

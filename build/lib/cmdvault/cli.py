@@ -141,23 +141,6 @@ def _default_export_path(fmt: str = "md") -> str:
     return str(base / name)
 
 
-# Simple ASCII banner for onboarding/setup
-def _banner() -> None:
-    art = (
-        "\n"
-        "  ██████  ███████ ██████  ████████ ██   ██\n"
-        "  ██   ██ ██      ██   ██    ██    ██   ██\n"
-        "  ██████  █████   ██████     ██    ███████\n"
-        "  ██   ██ ██      ██         ██       ██\n"
-        "  ██   ██ ███████ ██         ██       ██\n"
-        "\n    Repty — Search your shell history (FTS + AI)\n"
-    )
-    try:
-        print(art)
-    except Exception:
-        pass
-
-
 # State file to persist the last logged command id (legacy for prior tag logic)
 STATE_FILE = Path.home() / ".repty_state.json"
 
@@ -252,7 +235,6 @@ def _ensure_fts5_available() -> None:
 
 def cmd_setup(args: argparse.Namespace) -> int:
     """Set up Repty for immediate use: ensure deps, install hooks, configure AI key."""
-    _banner()
     # 1) Ensure FTS5 is available (auto-install pysqlite3-binary if needed)
     try:
         with _Spinner("Checking SQLite/FTS5..."):
@@ -287,67 +269,6 @@ def cmd_setup(args: argparse.Namespace) -> int:
             sys.stderr.write(f"Failed to save config: {e}\n")
 
     print("Setup complete. Open a new shell or reload your profile to start using Repty.")
-    return 0
-
-
-def _suggest_source_instructions() -> None:
-    try:
-        shell = os.environ.get("SHELL", "")
-        if "zsh" in shell:
-            print("Next: run 'source ~/.zshrc' or open a new terminal.")
-        elif "bash" in shell:
-            print("Next: run 'source ~/.bashrc' or open a new terminal.")
-        else:
-            print("Next: open a new terminal or source your shell profile (~/.bashrc or ~/.zshrc).")
-    except Exception:
-        print("Next: open a new terminal or source your shell profile (~/.bashrc or ~/.zshrc).")
-
-
-def onboarding_wizard() -> int:
-    """Interactive first-run experience shown when 'repty' is run with no args."""
-    _banner()
-    print("Let's get you set up. Press Enter to accept defaults.")
-
-    # 1) Install shell hooks
-    try:
-        resp = input("Install shell logging hooks now? [Y/n]: ").strip().lower()
-    except EOFError:
-        resp = "y"
-    if resp in ("", "y", "yes"):  # default yes
-        try:
-            msg = hooks_mod.install()
-            print(msg)
-            _suggest_source_instructions()
-        except Exception as e:
-            sys.stderr.write(f"Hook installation failed: {e}\n")
-    else:
-        print("Skipping hook installation. You can run 'repty install-hooks' later.")
-
-    # 2) Optionally set AI key
-    try:
-        resp = input("Configure Gemini AI now? [y/N]: ").strip().lower()
-    except EOFError:
-        resp = "n"
-    if resp in ("y", "yes"):
-        try:
-            api_key = input("Enter your Gemini API key (will be saved to ~/.repty_config.json): ").strip()
-        except EOFError:
-            api_key = ""
-        if api_key:
-            try:
-                c = cfg.load_config()
-                c["gemini_api_key"] = api_key
-                cfg.save_config(c)
-                print("Gemini API key saved to ~/.repty_config.json")
-            except Exception as e:
-                sys.stderr.write(f"Failed to save config: {e}\n")
-        else:
-            print("No key entered. You can set it later via: repty config set-key YOUR_KEY")
-    else:
-        print("You can enable AI later via: repty config set-key YOUR_KEY")
-
-    print("\nAll set! Try running some commands, then:")
-    print("  repty search git log")
     return 0
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -607,7 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    sub = p.add_subparsers(dest="cmd", required=False)
+    sub = p.add_subparsers(dest="cmd", required=True)
 
     # Hidden/internal: log (used by shell hooks)
     sp = sub.add_parser("log", help=argparse.SUPPRESS)
@@ -687,13 +608,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Any = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    # If no subcommand provided, show onboarding wizard in interactive terminals
-    if getattr(args, "cmd", None) is None:
-        if sys.stdout.isatty():
-            return onboarding_wizard()
-        # Non-interactive: print help
-        parser.print_help()
-        return 2
     return args.func(args)
 
 

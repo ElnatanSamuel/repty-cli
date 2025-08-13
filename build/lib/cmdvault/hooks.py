@@ -54,8 +54,6 @@ _cmdvault_postexec() {
     fi
   fi
   # Do not log empty commands or repty itself
-  # Trim leading/trailing whitespace to ensure filters match
-  cmd="$(printf '%s' "$cmd" | sed -E 's/^\\s+//;s/\\s+$//')"
   if [[ -n "$cmd" && "$cmd" != repty\ * && "$cmd" != source\ * && "$cmd" != .\ * ]]; then
     repty log --command "$cmd" --cwd "$CMDVAULT_LAST_CWD" --exit "$exit_code" >/dev/null 2>&1
   fi
@@ -97,8 +95,6 @@ _cmdvault_precmd() {
   if [[ -z "$cmd" ]]; then
     cmd="$CMDVAULT_LAST_CMD"
   fi
-  # Trim leading/trailing whitespace to ensure filters match
-  cmd="$(printf '%s' "$cmd" | sed -E 's/^\\s+//;s/\\s+$//')"
   if [[ -n "$cmd" && "$cmd" != repty\ * && "$cmd" != source\ * && "$cmd" != .\ * ]]; then
     repty log --command "$cmd" --cwd "$CMDVAULT_LAST_CWD" --exit "$exit_code" >/dev/null 2>&1
   fi
