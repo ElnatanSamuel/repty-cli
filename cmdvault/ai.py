@@ -135,7 +135,7 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
             if action_tokens:
                 rows_cmd_filtered = [
                     r for r in rows
-                    if any(t in (r.get("command") or "").lower() for t in action_tokens)
+                    if any(t in ((r["command"] or "").lower()) for t in action_tokens)
                 ]
                 if rows_cmd_filtered:
                     rows = rows_cmd_filtered
@@ -212,7 +212,7 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
                 if r is None:
                     continue
                 # Skip internal commands (but allow legitimate shell like 'source')
-                cmd = (r.get("command") or "").strip()
+                cmd = (r["command"] or "").strip()
                 if cmd.startswith("repty ") or cmd.startswith(". ") or cmd.startswith("source "):
                     continue
                 results.append({

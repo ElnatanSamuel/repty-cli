@@ -76,12 +76,48 @@ def _render_table(rows) -> None:
             tags_str = f"{tags:<{tag_w}}"
         line = f"{rid:>{id_w}} | {ts:<{ts_w}} | {ec_str} | {tags_str} | {_truncate(cmd, cmd_w)}"
         print(line)
-    # Footer tip (TTY only)
-    if rows and sys.stdout.isatty():
+
+
+def _maybe_prompt_copy(rows) -> None:
+    """If interactive, prompt the user to copy a command by id to clipboard."""
+    if not rows or not sys.stdout.isatty():
+        return
+    try:
+        resp = input("Copy a command by id (Enter to skip): ").strip()
+    except EOFError:
+        return
+    if not resp:
+        return
+    try:
+        target_id = int(resp)
+    except Exception:
+        print("Invalid id.")
+        return
+    # Try to find in current results first
+    chosen = None
+    for r in rows:
         try:
-            print("\nTip: use 'repty copy <id>' to copy, or add --copy-first to copy the top result.")
+            if int(r["id"]) == target_id:
+                chosen = r
+                break
         except Exception:
-            pass
+            continue
+    if chosen is None:
+        # Fallback to DB lookup
+        try:
+            with db.connect() as conn:
+                chosen = db.get_by_id(conn, target_id)
+        except Exception:
+            chosen = None
+    if not chosen:
+        print(f"No command with id={target_id}.")
+        return
+    text = (chosen["command"] or "")
+    if _copy_to_clipboard(text):
+        print(f"Copied command #{target_id} to clipboard.")
+    else:
+        print(text)
+        sys.stderr.write("Clipboard not available; printed command instead.\n")
 
 
 def _copy_to_clipboard(text: str) -> bool:
@@ -433,7 +469,12 @@ def cmd_search(args: argparse.Namespace) -> int:
             by_id[r["id"]] = r
     merged = list(by_id.values())
     # Exclude internal commands from results
-    merged = [r for r in merged if not ((r.get("command") or "").strip().startswith("repty ") or (r.get("command") or "").strip().startswith(". ") or (r.get("command") or "").strip().startswith("source "))]
+    def _cmd_text(row) -> str:
+        try:
+            return ((row.get("command") if isinstance(row, dict) else row["command"]) or "").strip()
+        except Exception:
+            return ""
+    merged = [r for r in merged if not (_cmd_text(r).startswith("repty ") or _cmd_text(r).startswith(". ") or _cmd_text(r).startswith("source "))]
     # Re-rank within merged: tag similarity first, then favorites (only if also matching)
     def tag_score(r) -> tuple:
         tagstr = (r["tags"] or "").lower()
@@ -459,6 +500,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             print("Copied top result to clipboard.")
         else:
             print("Could not copy to clipboard on this system.")
+    _maybe_prompt_copy(rows)
     return 0
 
 
@@ -471,6 +513,7 @@ def cmd_recent(args: argparse.Namespace) -> int:
                 print("Copied top result to clipboard.")
             else:
                 print("Could not copy to clipboard on this system.")
+        _maybe_prompt_copy(rows)
     return 0
 
 
@@ -640,7 +683,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
                     by_id[r["id"]] = r
             merged = list(by_id.values())
             # Exclude internal commands from results
-            merged = [r for r in merged if not ((r.get("command") or "").strip().startswith("repty ") or (r.get("command") or "").strip().startswith(". ") or (r.get("command") or "").strip().startswith("source "))]
+            merged = [r for r in merged if not (_cmd_text(r).startswith("repty ") or _cmd_text(r).startswith(". ") or _cmd_text(r).startswith("source "))]
             def tag_score(r) -> tuple:
                 tagstr = (r["tags"] or "").lower()
                 parts = []
@@ -665,7 +708,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
             }
             action_tokens = [t for t in tokens if t not in _GENERIC and len(t) >= 4]
             if action_tokens:
-                filtered = [r for r in merged if any(t in (r.get("command") or "").lower() for t in action_tokens)]
+                filtered = [r for r in merged if any(t in (_cmd_text(r).lower()) for t in action_tokens)]
                 if not filtered:
                     sys.stderr.write("No local commands matched those keywords.\n")
                     _render_table([])
@@ -680,6 +723,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
                     print("Copied top result to clipboard.")
                 else:
                     print("Could not copy to clipboard on this system.")
+            _maybe_prompt_copy(rows)
             return 0
         # Show a concise table first
         rows = [item["row"] for item in results]
@@ -689,6 +733,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
                 print("Copied top result to clipboard.")
             else:
                 print("Could not copy to clipboard on this system.")
+        _maybe_prompt_copy(rows)
         # Then, if any reasoning present, print under the table
         for item in results:
             reason = item.get("reason")
