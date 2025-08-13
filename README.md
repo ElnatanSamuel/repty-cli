@@ -9,6 +9,18 @@ All data stored locally in `~/.repty.db`. Config stored in `~/.repty_config.json
 
 ## Quick Start
 
+0) One-line install (handles PATH and launches the wizard)
+
+- macOS/Linux/WSL (Bash/Zsh):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/ElnatanSamuel/repty-cli/main/scripts/install.sh | bash
+  ```
+
+- Windows PowerShell:
+  ```powershell
+  irm https://raw.githubusercontent.com/ElnatanSamuel/repty-cli/main/scripts/install.ps1 | iex
+  ```
+
 1) Install and run `repty` (opens onboarding wizard)
 
 - pipx (recommended):
