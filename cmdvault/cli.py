@@ -24,6 +24,22 @@ def _truncate(text: str, width: int) -> str:
     return (text[: max(0, width - 1)].rstrip() + "…")
 
 
+def _row_text(row, key: str) -> str:
+    """Safely get a text field from sqlite3.Row or dict."""
+    try:
+        if isinstance(row, dict):
+            val = row.get(key)
+        else:
+            val = row[key]
+        return val if isinstance(val, str) else ("" if val is None else str(val))
+    except Exception:
+        return ""
+
+
+def _row_cmd(row) -> str:
+    return _row_text(row, "command").strip()
+
+
 def _render_table(rows) -> None:
     # Render a compact table: id | timestamp | exit | tags | command
     # Determine terminal width to size the command column
@@ -80,7 +96,7 @@ def _render_table(rows) -> None:
 
 def _maybe_prompt_copy(rows) -> None:
     """If interactive, prompt the user to copy a command by id to clipboard."""
-    if not rows or not sys.stdout.isatty():
+    if not rows or not (sys.stdout.isatty() or sys.stdin.isatty()):
         return
     try:
         resp = input("Copy a command by id (Enter to skip): ").strip()
@@ -469,12 +485,13 @@ def cmd_search(args: argparse.Namespace) -> int:
             by_id[r["id"]] = r
     merged = list(by_id.values())
     # Exclude internal commands from results
-    def _cmd_text(row) -> str:
-        try:
-            return ((row.get("command") if isinstance(row, dict) else row["command"]) or "").strip()
-        except Exception:
-            return ""
-    merged = [r for r in merged if not (_cmd_text(r).startswith("repty ") or _cmd_text(r).startswith(". ") or _cmd_text(r).startswith("source "))]
+    merged = [r for r in merged if not (_row_cmd(r).startswith("repty ") or _row_cmd(r).startswith(". ") or _row_cmd(r).startswith("source "))]
+    # Derive action tokens (ignore generic tool words) for relevance checks
+    _GENERIC = {
+        "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
+        "yarn", "docker", "kubectl", "kube", "ssh", "curl", "wget",
+    }
+    action_tokens = [t for t in tokens if t not in _GENERIC and len(t) >= 4]
     # Re-rank within merged: tag similarity first, then favorites (only if also matching)
     def tag_score(r) -> tuple:
         tagstr = (r["tags"] or "").lower()
@@ -486,14 +503,25 @@ def cmd_search(args: argparse.Namespace) -> int:
             parts.append(p)
             if p.startswith("desc:"):
                 parts.append(p[5:])
+        # Use action tokens to avoid matching on generic words like 'git'
         has_match = any(
             any(t in tp or tp in t for tp in parts)
-            for t in tokens
-        ) if tokens else False
+            for t in action_tokens
+        ) if action_tokens else False
         fav = any(tp == "favorite" for tp in parts)
         return (1 if has_match else 0, 1 if (has_match and fav) else 0)
     merged.sort(key=tag_score, reverse=True)
-    rows = merged[: args.limit] if args.limit else merged
+    # Apply action-token filter to improve precision
+    if action_tokens:
+        filtered = [r for r in merged if any(t in _row_cmd(r).lower() for t in action_tokens)]
+        if not filtered:
+            sys.stderr.write("No local commands matched those keywords.\n")
+            _render_table([])
+            return 0
+        rows = filtered
+    else:
+        rows = merged
+    rows = rows[: args.limit] if args.limit else rows
     _render_table(rows)
     if getattr(args, "copy_first", False) and rows:
         if _copy_to_clipboard(rows[0]["command"] or ""):
@@ -683,7 +711,13 @@ def cmd_ai(args: argparse.Namespace) -> int:
                     by_id[r["id"]] = r
             merged = list(by_id.values())
             # Exclude internal commands from results
-            merged = [r for r in merged if not (_cmd_text(r).startswith("repty ") or _cmd_text(r).startswith(". ") or _cmd_text(r).startswith("source "))]
+            merged = [r for r in merged if not (_row_cmd(r).startswith("repty ") or _row_cmd(r).startswith(". ") or _row_cmd(r).startswith("source "))]
+            # Derive action tokens before ranking
+            _GENERIC = {
+                "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
+                "yarn", "docker", "kubectl", "kube", "ssh", "curl", "wget",
+            }
+            action_tokens = [t for t in tokens if t not in _GENERIC and len(t) >= 4]
             def tag_score(r) -> tuple:
                 tagstr = (r["tags"] or "").lower()
                 parts = []
@@ -696,19 +730,14 @@ def cmd_ai(args: argparse.Namespace) -> int:
                         parts.append(p[5:])
                 has_match = any(
                     any(t in tp or tp in t for tp in parts)
-                    for t in tokens
-                ) if tokens else False
+                    for t in action_tokens
+                ) if action_tokens else False
                 fav = any(tp == "favorite" for tp in parts)
                 return (1 if has_match else 0, 1 if (has_match and fav) else 0)
             merged.sort(key=tag_score, reverse=True)
             # Apply action-token filter to local results to avoid irrelevant commands
-            _GENERIC = {
-                "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
-                "yarn", "docker", "kubectl", "kube", "ssh", "curl", "wget",
-            }
-            action_tokens = [t for t in tokens if t not in _GENERIC and len(t) >= 4]
             if action_tokens:
-                filtered = [r for r in merged if any(t in (_cmd_text(r).lower()) for t in action_tokens)]
+                filtered = [r for r in merged if any(t in (_row_cmd(r).lower()) for t in action_tokens)]
                 if not filtered:
                     sys.stderr.write("No local commands matched those keywords.\n")
                     _render_table([])
@@ -727,6 +756,15 @@ def cmd_ai(args: argparse.Namespace) -> int:
             return 0
         # Show a concise table first
         rows = [item["row"] for item in results]
+        # Apply action-token filter to AI results to avoid irrelevant commands
+        tokens = _clean_query(raw).split()
+        _GENERIC = {
+            "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
+            "yarn", "docker", "kubectl", "kube", "ssh", "curl", "wget",
+        }
+        action_tokens = [t for t in tokens if t not in _GENERIC and len(t) >= 4]
+        if action_tokens:
+            rows = [r for r in rows if any(t in _row_cmd(r).lower() for t in action_tokens)]
         _render_table(rows)
         if getattr(args, "copy_first", False) and rows:
             if _copy_to_clipboard(rows[0]["command"] or ""):
