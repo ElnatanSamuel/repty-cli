@@ -6,6 +6,7 @@ import os
 import threading
 import time
 import subprocess
+import shutil
 import importlib
 from itertools import cycle
 from pathlib import Path
@@ -27,7 +28,6 @@ def _render_table(rows) -> None:
     # Render a compact table: id | timestamp | exit | tags | command
     # Determine terminal width to size the command column
     try:
-        import shutil
         term_width = shutil.get_terminal_size(fallback=(100, 20)).columns
     except Exception:
         term_width = 100
@@ -47,7 +47,13 @@ def _render_table(rows) -> None:
     cmd_w = max(20, term_width - (id_w + ts_w + ec_w + tag_w + sep_w))
 
     header = f"{'id':>{id_w}} | {'timestamp':<{ts_w}} | {'exit':>{ec_w}} | {'tags':<{tag_w}} | command"
-    print(header)
+    # Styled header if TTY
+    if sys.stdout.isatty():
+        # Bright cyan header
+        header_print = f"\033[96m{header}\033[0m"
+    else:
+        header_print = header
+    print(header_print)
     print("-" * min(term_width, len(header)))
     for i, r in enumerate(rows):
         # sqlite3.Row supports mapping access
@@ -56,8 +62,67 @@ def _render_table(rows) -> None:
         ec = r["exit_code"] if r["exit_code"] is not None else "?"
         tags = tags_list[i]
         cmd = r["command"] or ""
-        line = f"{rid:>{id_w}} | {ts:<{ts_w}} | {ec:>{ec_w}} | {tags:<{tag_w}} | {_truncate(cmd, cmd_w)}"
+        # Style exit code: green 0, red non-zero, yellow unknown
+        if sys.stdout.isatty():
+            if ec == 0:
+                ec_str = f"\033[92m{ec:>{ec_w}}\033[0m"
+            elif ec == "?":
+                ec_str = f"\033[93m{ec:>{ec_w}}\033[0m"
+            else:
+                ec_str = f"\033[91m{ec:>{ec_w}}\033[0m"
+            tags_str = f"\033[2m{tags:<{tag_w}}\033[0m" if tags else f"{tags:<{tag_w}}"
+        else:
+            ec_str = f"{ec:>{ec_w}}"
+            tags_str = f"{tags:<{tag_w}}"
+        line = f"{rid:>{id_w}} | {ts:<{ts_w}} | {ec_str} | {tags_str} | {_truncate(cmd, cmd_w)}"
         print(line)
+    # Footer tip (TTY only)
+    if rows and sys.stdout.isatty():
+        try:
+            print("\nTip: use 'repty copy <id>' to copy, or add --copy-first to copy the top result.")
+        except Exception:
+            pass
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy text to clipboard on Windows/macOS/Linux without extra deps.
+    Returns True on success, False otherwise.
+    """
+    try:
+        data = text or ""
+        # Windows or WSL: try clip.exe first
+        if os.name == "nt" or os.environ.get("WSL_DISTRO_NAME"):
+            exe = shutil.which("clip.exe") or shutil.which("clip")
+            if exe:
+                subprocess.run([exe], input=data, text=True, check=True)
+                return True
+            # PowerShell fallback
+            pwsh = shutil.which("pwsh") or shutil.which("powershell") or shutil.which("powershell.exe")
+            if pwsh:
+                cmd = [pwsh, "-NoProfile", "-Command", "Set-Clipboard -Value $input"]
+                subprocess.run(cmd, input=data, text=True, check=True)
+                return True
+        # macOS
+        if sys.platform == "darwin":
+            exe = shutil.which("pbcopy")
+            if exe:
+                subprocess.run([exe], input=data, text=True, check=True)
+                return True
+        # Linux/BSD: try Wayland first, then X11 tools
+        for candidate in ("wl-copy", "xclip", "xsel"):
+            exe = shutil.which(candidate)
+            if not exe:
+                continue
+            if candidate == "xclip":
+                subprocess.run([exe, "-selection", "clipboard"], input=data, text=True, check=True)
+            elif candidate == "xsel":
+                subprocess.run([exe, "--clipboard", "--input"], input=data, text=True, check=True)
+            else:  # wl-copy
+                subprocess.run([exe], input=data, text=True, check=True)
+            return True
+    except Exception:
+        return False
+    return False
 
 
 class _Spinner:
@@ -367,7 +432,9 @@ def cmd_search(args: argparse.Namespace) -> int:
         if r["id"] not in by_id:
             by_id[r["id"]] = r
     merged = list(by_id.values())
-    # Re-rank within merged: tag similarity first, then favorites
+    # Exclude internal commands from results
+    merged = [r for r in merged if not ((r.get("command") or "").strip().startswith("repty ") or (r.get("command") or "").strip().startswith(". ") or (r.get("command") or "").strip().startswith("source "))]
+    # Re-rank within merged: tag similarity first, then favorites (only if also matching)
     def tag_score(r) -> tuple:
         tagstr = (r["tags"] or "").lower()
         parts = []
@@ -383,10 +450,15 @@ def cmd_search(args: argparse.Namespace) -> int:
             for t in tokens
         ) if tokens else False
         fav = any(tp == "favorite" for tp in parts)
-        return (1 if has_match else 0, 1 if fav else 0)
+        return (1 if has_match else 0, 1 if (has_match and fav) else 0)
     merged.sort(key=tag_score, reverse=True)
     rows = merged[: args.limit] if args.limit else merged
     _render_table(rows)
+    if getattr(args, "copy_first", False) and rows:
+        if _copy_to_clipboard(rows[0]["command"] or ""):
+            print("Copied top result to clipboard.")
+        else:
+            print("Could not copy to clipboard on this system.")
     return 0
 
 
@@ -394,6 +466,11 @@ def cmd_recent(args: argparse.Namespace) -> int:
     with db.connect() as conn:
         rows = db.recent(conn, limit=args.limit)
         _render_table(rows)
+        if getattr(args, "copy_first", False) and rows:
+            if _copy_to_clipboard(rows[0]["command"] or ""):
+                print("Copied top result to clipboard.")
+            else:
+                print("Could not copy to clipboard on this system.")
     return 0
 
 
@@ -406,6 +483,26 @@ def cmd_save(args: argparse.Namespace) -> int:
     with db.connect() as conn:
         new_id = db.add_command(conn, command=command, cwd=cwd, exit_code=None, tags=tags)
     print(f"Saved favorite #{new_id}: {description}")
+    return 0
+
+
+def cmd_copy(args: argparse.Namespace) -> int:
+    cmd_id = int(args.id)
+    with db.connect() as conn:
+        row = db.get_by_id(conn, cmd_id)
+    if not row:
+        sys.stderr.write(f"No command found with id={cmd_id}\n")
+        return 1
+    text = row["command"] or ""
+    if not text.strip():
+        sys.stderr.write("Command is empty.\n")
+        return 1
+    if _copy_to_clipboard(text):
+        print(f"Copied command #{cmd_id} to clipboard.")
+        return 0
+    # Fallback: print to stdout so the user can copy manually
+    print(text)
+    sys.stderr.write("Clipboard not available; printed command instead.\n")
     return 0
 
 
@@ -528,7 +625,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
             results = ai_mod.ai_search(raw, limit=args.limit)
         # If AI returns no results, fall back to local search so the user sees something
         if not results:
-            sys.stderr.write("No AI-ranked matches. Showing local matches...\n")
+            sys.stderr.write("No AI-ranked matches. Searching locally...\n")
             cleaned = _clean_query(raw)
             match_q = db.build_fts_query(cleaned or raw, mode="and", prefix=True)
             with _Spinner("Searching locally..."):
@@ -542,6 +639,8 @@ def cmd_ai(args: argparse.Namespace) -> int:
                 if r["id"] not in by_id:
                     by_id[r["id"]] = r
             merged = list(by_id.values())
+            # Exclude internal commands from results
+            merged = [r for r in merged if not ((r.get("command") or "").strip().startswith("repty ") or (r.get("command") or "").strip().startswith(". ") or (r.get("command") or "").strip().startswith("source "))]
             def tag_score(r) -> tuple:
                 tagstr = (r["tags"] or "").lower()
                 parts = []
@@ -557,13 +656,39 @@ def cmd_ai(args: argparse.Namespace) -> int:
                     for t in tokens
                 ) if tokens else False
                 fav = any(tp == "favorite" for tp in parts)
-                return (1 if has_match else 0, 1 if fav else 0)
+                return (1 if has_match else 0, 1 if (has_match and fav) else 0)
             merged.sort(key=tag_score, reverse=True)
-            rows = merged[: args.limit] if args.limit else merged
+            # Apply action-token filter to local results to avoid irrelevant commands
+            _GENERIC = {
+                "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
+                "yarn", "docker", "kubectl", "kube", "ssh", "curl", "wget",
+            }
+            action_tokens = [t for t in tokens if t not in _GENERIC and len(t) >= 4]
+            if action_tokens:
+                filtered = [r for r in merged if any(t in (r.get("command") or "").lower() for t in action_tokens)]
+                if not filtered:
+                    sys.stderr.write("No local commands matched those keywords.\n")
+                    _render_table([])
+                    return 0
+                rows = filtered
+            else:
+                rows = merged
+            rows = rows[: args.limit] if args.limit else rows
             _render_table(rows)
+            if getattr(args, "copy_first", False) and rows:
+                if _copy_to_clipboard(rows[0]["command"] or ""):
+                    print("Copied top result to clipboard.")
+                else:
+                    print("Could not copy to clipboard on this system.")
             return 0
         # Show a concise table first
-        _render_table([item["row"] for item in results])
+        rows = [item["row"] for item in results]
+        _render_table(rows)
+        if getattr(args, "copy_first", False) and rows:
+            if _copy_to_clipboard(rows[0]["command"] or ""):
+                print("Copied top result to clipboard.")
+            else:
+                print("Could not copy to clipboard on this system.")
         # Then, if any reasoning present, print under the table
         for item in results:
             reason = item.get("reason")
@@ -656,6 +781,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("search", help="Local FTS search (multi-word OK)")
     sp.add_argument("query", nargs="+")
     sp.add_argument("--limit", type=int, default=cfg.load_config().get("default_search_limit", 5))
+    sp.add_argument("--copy-first", action="store_true", help="Copy the top result to clipboard")
     sp.set_defaults(func=cmd_search)
 
     sp = sub.add_parser(
@@ -669,10 +795,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("query", nargs="+")
     sp.add_argument("--limit", type=int, default=cfg.load_config().get("default_search_limit", 5))
+    sp.add_argument("--copy-first", action="store_true", help="Copy the top result to clipboard")
     sp.set_defaults(func=cmd_ai)
 
     sp = sub.add_parser("recent", help="Show most recent commands")
     sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--copy-first", action="store_true", help="Copy the top result to clipboard")
     sp.set_defaults(func=cmd_recent)
 
     sp = sub.add_parser("save", help="Save a favorite manually")
@@ -680,6 +808,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("command")
     sp.add_argument("--cwd", default="")
     sp.set_defaults(func=cmd_save)
+
+    # Copy command by id
+    sp = sub.add_parser("copy", help="Copy command text to clipboard by id")
+    sp.add_argument("id", type=int)
+    sp.set_defaults(func=cmd_copy)
 
     sp = sub.add_parser("export", help="Export history to Markdown or CSV")
     sp.add_argument("file", nargs="?", help="Destination file path (.md or .csv). If omitted, you will be prompted.")

@@ -122,17 +122,41 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
             # Use the filtered rows for ID mapping
             rows = filtered_rows
 
+            # Hard relevance filter: if we have action tokens from the query, restrict
+            # candidates to those whose command contains at least one token. If none match,
+            # keep the original set to avoid zero-candidate situations.
+            tokens_list = (cleaned or "").split()
+            # Derive action tokens by removing generic tooling nouns that cause false positives
+            _GENERIC = {
+                "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
+                "yarn", "docker", "kubectl", "kube", "ssh", "curl", "wget",
+            }
+            action_tokens = [t for t in tokens_list if t not in _GENERIC and len(t) >= 4]
+            if action_tokens:
+                rows_cmd_filtered = [
+                    r for r in rows
+                    if any(t in (r.get("command") or "").lower() for t in action_tokens)
+                ]
+                if rows_cmd_filtered:
+                    rows = rows_cmd_filtered
+                    # Also narrow commands_ctx to the same ids
+                    allowed_ids = {r["id"] for r in rows}
+                    commands_ctx = [c for c in commands_ctx if c["id"] in allowed_ids]
+
         prompt = {
             "query": query,
             "instructions": (
                 "You are a CLI command retrieval assistant. Given the user's natural language query and a list of previously executed commands, "
                 "identify the most relevant commands. Prefer commands that likely succeeded (exit_code==0) and whose cwd or tags match the intent. "
                 "You MUST choose only from the provided 'commands' list (these are candidates from local FTS); do NOT invent ids. "
+                "If 'tokens' are provided, ONLY select commands whose command string contains at least one of those tokens (case-insensitive). "
                 "Favor favorites only when relevant to the query. "
                 "Return a JSON array of objects with fields: id (int), score (float 0-10 where 10 is best), reason (short string). "
                 "Output MUST be a JSON array only. No prose, no prefixes/suffixes, and NO code fences."
             ),
             "commands": commands_ctx,
+            # Only provide action tokens to avoid matching on generic words like 'git'
+            "tokens": action_tokens,
         }
 
         # Request pure JSON back
