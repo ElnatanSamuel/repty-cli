@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repty-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Dual-mode terminal command history tool with SQLite FTS5 and Gemini AI search"
 authors = [{ name = "Repty" }]
 readme = "README.md"
@@ -22,3 +22,4 @@ license-files = ["LICENSE"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cmdvault*"]
+exclude = ["build*", "dist*", "*.egg-info*"]

@@ -44,10 +44,19 @@ function Run-App {
   $candidate = Join-Path $HOME '.local\bin\repty.exe'
   if (Test-Path $candidate) {
     & $candidate
+    if ($LASTEXITCODE -ne 0) {
+      & $candidate setup
+    }
     return
   }
   $reptyCmd = Get-Command repty -ErrorAction SilentlyContinue
-  if ($reptyCmd) { & $reptyCmd.Path; return }
+  if ($reptyCmd) {
+    & $reptyCmd.Path
+    if ($LASTEXITCODE -ne 0) {
+      & $reptyCmd.Path setup
+    }
+    return
+  }
   Warn "Could not locate 'repty' on PATH. Try opening a new terminal or run: $candidate"
 }
 

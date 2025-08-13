@@ -42,15 +42,19 @@ install_app() {
 
 run_app() {
   # Run via absolute path to avoid PATH issues in current shell
+  local APP
   if [ -x "$HOME/.local/bin/${BIN_NAME}" ]; then
-    "$HOME/.local/bin/${BIN_NAME}"
+    APP="$HOME/.local/bin/${BIN_NAME}"
+  elif command -v ${BIN_NAME} >/dev/null 2>&1; then
+    APP="${BIN_NAME}"
   else
-    # fallback if pipx uses different bin dir
-    if command -v ${BIN_NAME} >/dev/null 2>&1; then
-      ${BIN_NAME}
-    else
-      warn "Could not locate ${BIN_NAME} on PATH. You can run it with: $HOME/.local/bin/${BIN_NAME}"
-    fi
+    warn "Could not locate ${BIN_NAME} on PATH. You can run it with: $HOME/.local/bin/${BIN_NAME}"
+    return 0
+  fi
+
+  # Try onboarding (no args). If that fails (older versions), fall back to 'setup'.
+  if ! "$APP"; then
+    "$APP" setup || true
   fi
 }
 
