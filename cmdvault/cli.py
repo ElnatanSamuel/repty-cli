@@ -40,6 +40,22 @@ def _row_cmd(row) -> str:
     return _row_text(row, "command").strip()
 
 
+def _is_internal_command(cmd: str) -> bool:
+    s = (cmd or "").strip()
+    if not s:
+        return False
+    # direct CLI
+    if s == "repty" or s.startswith("repty "):
+        return True
+    # shell sourcing / dot commands
+    if s.startswith(". ") or s.startswith("source "):
+        return True
+    # python module invocations: python -m cmdvault[.cli]
+    if re.match(r"^(?:python|python3|py)\s+-m\s+cmdvault(?:\.cli)?\b", s):
+        return True
+    return False
+
+
 def _render_table(rows) -> None:
     # Render a compact table: id | timestamp | exit | tags | command
     # Determine terminal width to size the command column
@@ -485,7 +501,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             by_id[r["id"]] = r
     merged = list(by_id.values())
     # Exclude internal commands from results
-    merged = [r for r in merged if not (_row_cmd(r).startswith("repty ") or _row_cmd(r).startswith(". ") or _row_cmd(r).startswith("source "))]
+    merged = [r for r in merged if not _is_internal_command(_row_cmd(r))]
     # Derive action tokens (ignore generic tool words) for relevance checks
     _GENERIC = {
         "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
@@ -518,7 +534,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             sys.stderr.write("No local commands matched those keywords.\n")
             _render_table([])
             return 0
-        rows = filtered
+        rows = [r for r in filtered if not _is_internal_command(_row_cmd(r))]
     else:
         rows = merged
     rows = rows[: args.limit] if args.limit else rows
@@ -711,7 +727,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
                     by_id[r["id"]] = r
             merged = list(by_id.values())
             # Exclude internal commands from results
-            merged = [r for r in merged if not (_row_cmd(r).startswith("repty ") or _row_cmd(r).startswith(". ") or _row_cmd(r).startswith("source "))]
+            merged = [r for r in merged if not _is_internal_command(_row_cmd(r))]
             # Derive action tokens before ranking
             _GENERIC = {
                 "git", "bash", "zsh", "fish", "python", "pip", "pipx", "node", "npm", "pnpm",
@@ -742,7 +758,7 @@ def cmd_ai(args: argparse.Namespace) -> int:
                     sys.stderr.write("No local commands matched those keywords.\n")
                     _render_table([])
                     return 0
-                rows = filtered
+                rows = [r for r in filtered if not _is_internal_command(_row_cmd(r))]
             else:
                 rows = merged
             rows = rows[: args.limit] if args.limit else rows
