@@ -1,12 +1,46 @@
 # repty
 
 Dual-mode terminal command history tool for Bash/Zsh with:
+
 - Local fast search via SQLite FTS5
 - Optional Gemini AI search that understands natural language
 
 All data stored locally in `~/.repty.db`. Config stored in `~/.repty_config.json`.
 
+## Quick Start
+
+1) Install and run `repty` (opens onboarding wizard)
+
+- pipx (recommended):
+  ```bash
+  pipx install git+https://github.com/ElnatanSamuel/repty-cli.git
+  repty  # launches setup wizard (installs hooks, optional AI key)
+  ```
+
+- pip in a virtualenv:
+  ```bash
+  python -m venv .venv
+  # macOS/Linux
+  source .venv/bin/activate
+  # Windows PowerShell
+  . .venv/Scripts/Activate.ps1
+
+  pip install "repty-cli @ git+https://github.com/ElnatanSamuel/repty-cli.git"
+  repty  # launches setup wizard (installs hooks, optional AI key)
+  ```
+
+2) Reload your shell profile or open a new terminal
+- Bash: `source ~/.bashrc`
+- Zsh: `source ~/.zshrc`
+- PowerShell: `. $PROFILE`
+
+3) Try it
+```bash
+repty search "git log"
+```
+
 ## Features
+
 - Auto-log every command you run (command text, timestamp, cwd, exit code, tags)
 - Inline tags using comments like `#tag build` or `#tag deploy`
 - Local search: `repty search "keywords"` (FTS5)
@@ -17,6 +51,7 @@ All data stored locally in `~/.repty.db`. Config stored in `~/.repty_config.json
 - One-step hook installer for `.bashrc` and `.zshrc`
 
 ## Requirements
+
 - Python 3.9+
 - SQLite with FTS5 support
   - Most modern Python builds (3.11+) include FTS5. If you see an error about missing FTS5, install `pysqlite3-binary` and set env var: `REPTY_SQLITE_BACKEND=pysqlite3` before running. Alternatively, use a Python with FTS5-enabled sqlite.
@@ -24,21 +59,44 @@ All data stored locally in `~/.repty.db`. Config stored in `~/.repty_config.json
 
 ## Install
 
-Using pip (recommended in a virtualenv):
+From GitHub with pipx (recommended):
 
 ```bash
-pip install .
+pipx install git+https://github.com/ElnatanSamuel/repty-cli.git
+repty
 ```
 
-Or for development:
+With pip in a virtualenv:
 
 ```bash
+python -m venv .venv
+# macOS/Linux
+source .venv/bin/activate
+# Windows PowerShell
+. .venv/Scripts/Activate.ps1
+
+pip install "repty-cli @ git+https://github.com/ElnatanSamuel/repty-cli.git"
+repty
+```
+
+From source (development):
+
+```bash
+git clone https://github.com/ElnatanSamuel/repty-cli.git
+cd repty-cli
+python -m venv .venv
+# macOS/Linux
+source .venv/bin/activate
+# Windows PowerShell
+. .venv/Scripts/Activate.ps1
 pip install -e .
+repty
 ```
-
-This installs the `repty` CLI.
 
 ### Install shell hooks
+
+If you ran the `repty` onboarding wizard, hooks are already installed. This section is optional.
+
 Append logging hooks to your shell init files:
 
 ```bash
@@ -50,9 +108,11 @@ repty uninstall-hooks
 Hooks are added to `~/.bashrc` and `~/.zshrc` between clearly marked blocks. They capture each executed command and log it via `repty log ...`.
 
 Windows/PowerShell:
+
 - Native PowerShell auto-logging is supported. The installer will add a hook block to your PowerShell profile.
 
 ## Configuration
+
 Create or edit `~/.repty_config.json`:
 
 ```json
@@ -74,22 +134,26 @@ repty config show
 ## Usage
 
 - Local search (FTS5):
+
   ```bash
   repty search "docker build"
   repty search "tags:deploy"
   ```
 
 - AI search (Gemini with fallback to local on failure):
+
   ```bash
   repty ai "how did I start my local postgres last week?"
   ```
 
 - Show recent:
+
   ```bash
   repty recent --limit 30
   ```
 
 - Save a favorite:
+
   ```bash
   repty save "build backend" "docker build -t myapp:latest ."
   ```
@@ -101,6 +165,7 @@ repty config show
   ```
 
 ## How it works
+
 - A small Bash/Zsh snippet installs preexec/precmd (Zsh) or DEBUG/PROMPT_COMMAND (Bash) hooks.
 - After each command runs, the hook calls `repty log --command "..." --cwd "..." --exit <code>` in the background.
 - Commands are stored in `~/.repty.db` with the schema:
@@ -122,6 +187,7 @@ CREATE VIRTUAL TABLE commands_fts USING fts5(
 - FTS stays in sync via triggers.
 
 ## Troubleshooting
+
 - FTS5 not available: Use Python with FTS5-enabled sqlite (3.11+ often OK) or
   ```bash
   pip install pysqlite3-binary
@@ -131,8 +197,10 @@ CREATE VIRTUAL TABLE commands_fts USING fts5(
 - Hooks not firing: Ensure your shell is interactive and that `repty` is on PATH.
 
 ## Security notes
+
 - Only command text, timestamp, cwd, exit code, and optional tags are stored locally.
 - AI mode sends only a subset (default last 500) commands + your query to Gemini for ranking. Disable by avoiding `repty ai`.
 
 ## License
+
 MIT
