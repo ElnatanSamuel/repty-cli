@@ -1,0 +1,15 @@
+LICENSE
+README.md
+pyproject.toml
+cmdvault/__init__.py
+cmdvault/ai.py
+cmdvault/cli.py
+cmdvault/config.py
+cmdvault/db.py
+cmdvault/hooks.py
+cmdvault.egg-info/PKG-INFO
+cmdvault.egg-info/SOURCES.txt
+cmdvault.egg-info/dependency_links.txt
+cmdvault.egg-info/entry_points.txt
+cmdvault.egg-info/requires.txt
+cmdvault.egg-info/top_level.txt

@@ -1,0 +1,3 @@
+# Core runtime deps for cmdvault
+# Google Gemini (optional, only needed for `cmdvault ai`)
+google-generativeai>=0.7.0

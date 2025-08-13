@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmdvault"
+version = "0.1.0"
+description = "Dual-mode terminal command history tool with SQLite FTS5 and Gemini AI search"
+authors = [{ name = "CmdVault" }]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "google-generativeai>=0.7.0",
+]
+
+[project.scripts]
+cmdvault = "cmdvault.cli:main"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cmdvault*"]
