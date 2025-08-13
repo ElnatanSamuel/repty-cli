@@ -526,6 +526,42 @@ def cmd_ai(args: argparse.Namespace) -> int:
     try:
         with _Spinner("AI searching..."):
             results = ai_mod.ai_search(raw, limit=args.limit)
+        # If AI returns no results, fall back to local search so the user sees something
+        if not results:
+            sys.stderr.write("No AI-ranked matches. Showing local matches...\n")
+            cleaned = _clean_query(raw)
+            match_q = db.build_fts_query(cleaned or raw, mode="and", prefix=True)
+            with _Spinner("Searching locally..."):
+                with db.connect() as conn:
+                    tokens = _clean_query(raw).split()
+                    tag_rows = db.search_by_tags(conn, tokens, limit=args.limit or 50)
+                    rows_fts = db.search_fts(conn, match_q or cleaned or raw, limit=args.limit or 50)
+            # Merge with tag priority and re-rank
+            by_id = {r["id"]: r for r in tag_rows}
+            for r in rows_fts:
+                if r["id"] not in by_id:
+                    by_id[r["id"]] = r
+            merged = list(by_id.values())
+            def tag_score(r) -> tuple:
+                tagstr = (r["tags"] or "").lower()
+                parts = []
+                for p in tagstr.split(","):
+                    p = p.strip()
+                    if not p:
+                        continue
+                    parts.append(p)
+                    if p.startswith("desc:"):
+                        parts.append(p[5:])
+                has_match = any(
+                    any(t in tp or tp in t for tp in parts)
+                    for t in tokens
+                ) if tokens else False
+                fav = any(tp == "favorite" for tp in parts)
+                return (1 if has_match else 0, 1 if fav else 0)
+            merged.sort(key=tag_score, reverse=True)
+            rows = merged[: args.limit] if args.limit else merged
+            _render_table(rows)
+            return 0
         # Show a concise table first
         _render_table([item["row"] for item in results])
         # Then, if any reasoning present, print under the table

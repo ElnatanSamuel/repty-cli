@@ -202,9 +202,9 @@ def ai_search(query: str, limit: int = 50, context_limit: Optional[int] = None) 
 
         # Apply score threshold (configurable), then deduplicate by command string.
         try:
-            threshold = float(cfg.get("ai_min_score", 5.0))
+            threshold = float(cfg.get("ai_min_score", 3.0))
         except Exception:
-            threshold = 5.0
+            threshold = 3.0
         results = [it for it in results if it.get("score", 0.0) >= threshold]
 
         # Deduplicate by command string; keep highest score; tie-break by newer id
